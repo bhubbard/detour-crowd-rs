@@ -2,6 +2,7 @@
 
 [![Crates.io](https://img.shields.io/badge/crates.io-v0.1.0-orange.svg)](https://crates.io)
 [![Documentation](https://docs.rs/detour-crowd-rs/badge.svg)](https://docs.rs/detour-crowd-rs)
+[![Website](https://img.shields.io/badge/website-live-brightgreen.svg)](https://bhubbard.github.io/detour-crowd-rs/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 
 A pure Rust port of **DetourCrowd** from [RecastNavigation](https://github.com/recastnavigation/recastnavigation). Features Reciprocal Velocity Obstacles (RVO), adaptive velocity space sampling, spatial hashing proximity grid for $O(1)$ neighbor queries, corridor navigation, and boundary / separation steering forces.

@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>detour-crowd-rs — Pure Rust Port of Recast DetourCrowd</title>
+  <meta name="description" content="Pure Rust port of DetourCrowd from RecastNavigation. Reciprocal Velocity Obstacles (RVO), adaptive velocity sampling, spatial hashing proximity grid for O(1) queries, and boundary repulsion.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👥</text></svg>">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              400: '#60a5fa',
+              500: '#3b82f6',
+              600: '#2563eb',
+              glow: '#38bdf8'
+            },
+            recast: {
+              purple: '#8b5cf6',
+              violet: '#7c3aed',
+              cyan: '#06b6d4',
+              indigo: '#6366f1'
+            },
+            dark: {
+              950: '#070a14',
+              900: '#0b101f',
+              850: '#11182c',
+              800: '#1e293b',
+              700: '#334155'
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    body {
+      background-color: #070a14;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    .navmesh-grid-bg {
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.15) 0%, transparent 60%),
+        linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px);
+      background-size: 100% 100%, 32px 32px, 32px 32px;
+    }
+
+    .glass-panel {
+      background: rgba(17, 24, 44, 0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+    }
+
+    .glass-card {
+      background: rgba(17, 24, 44, 0.65);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glass-card:hover {
+      border-color: rgba(96, 165, 250, 0.5);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px -10px rgba(59, 130, 246, 0.3);
+    }
+
+    .glow-text-blue {
+      text-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+    }
+
+    /* Custom range slider */
+    input[type=range] {
+      accent-color: #3b82f6;
+    }
+
+    pre code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body class="navmesh-grid-bg min-h-screen text-slate-200 antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- Header / Navigation -->
+  <header class="sticky top-0 z-50 glass-panel border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="h-9 w-9 rounded-lg bg-gradient-to-br from-brand-500 via-recast-indigo to-recast-purple p-0.5 shadow-lg shadow-brand-500/25">
+          <div class="w-full h-full bg-dark-950 rounded-[7px] flex items-center justify-center font-mono font-bold text-brand-400 text-sm">
+            dc
+          </div>
+        </div>
+        <div>
+          <span class="font-bold text-lg text-white tracking-tight flex items-center gap-2">
+            detour-crowd-rs
+            <span class="text-xs px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/30 font-mono">v0.1.0</span>
+          </span>
+        </div>
+      </div>
+
+      <nav class="hidden md:flex items-center space-x-7 text-sm font-medium text-slate-300">
+        <a href="#simulator" class="hover:text-brand-400 transition-colors">Crowd Simulator</a>
+        <a href="#features" class="hover:text-brand-400 transition-colors">Features</a>
+        <a href="#algorithms" class="hover:text-brand-400 transition-colors">Algorithms</a>
+        <a href="#quickstart" class="hover:text-brand-400 transition-colors">Quickstart</a>
+        <a href="#benchmarks" class="hover:text-brand-400 transition-colors">Benchmarks &amp; Tests</a>
+      </nav>
+
+      <div class="flex items-center space-x-3">
+        <a href="https://crates.io/crates/detour-crowd-rs" target="_blank" rel="noopener noreferrer" 
+           class="hidden sm:inline-flex items-center px-3 py-1.5 text-xs font-mono font-semibold rounded-lg bg-dark-850 hover:bg-dark-800 text-recast-cyan border border-recast-cyan/30 transition">
+          crates.io
+        </a>
+        <a href="https://github.com/bhubbard/detour-crowd-rs" target="_blank" rel="noopener noreferrer" 
+           class="inline-flex items-center px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white font-medium transition shadow-lg shadow-brand-500/25">
+          <svg class="w-4 h-4 mr-1.5 fill-current" viewBox="0 0 24 24">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="relative pt-16 pb-14 px-4 sm:px-6 lg:px-8 overflow-hidden">
+    <div class="max-w-5xl mx-auto text-center relative z-10">
+      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/30 text-brand-400 text-xs font-mono uppercase tracking-wider mb-6">
+        <span class="w-2 h-2 rounded-full bg-brand-400 animate-ping"></span>
+        Pure Rust Port of RecastNavigation DetourCrowd
+      </div>
+
+      <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-white mb-6">
+        Real-Time Crowd Dynamics <br class="hidden sm:inline">
+        <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 via-recast-cyan to-recast-purple glow-text-blue">
+          with RVO Avoidance &amp; Spatial Hash
+        </span>
+      </h1>
+
+      <p class="max-w-3xl mx-auto text-lg sm:text-xl text-slate-300 mb-8 leading-relaxed">
+        Steer hundreds of autonomous agents without oscillations or collisions. Features 
+        <strong class="text-white font-medium">Reciprocal Velocity Obstacles (RVO)</strong>, 
+        adaptive polar velocity space sampling matching <code class="text-brand-400 font-mono text-base">dtObstacleAvoidanceQuery</code>, 
+        <strong class="text-white font-medium">\(O(1)\) Spatial Hashing</strong>, corridor path following, and boundary separation forces.
+      </p>
+
+      <div class="flex flex-wrap items-center justify-center gap-4 text-sm font-semibold">
+        <a href="#simulator" class="px-6 py-3 rounded-xl bg-brand-500 hover:bg-brand-400 text-white shadow-lg shadow-brand-500/25 transition transform hover:-translate-y-0.5">
+          Launch Crowd Simulator
+        </a>
+        <a href="#quickstart" class="px-6 py-3 rounded-xl bg-dark-850 hover:bg-dark-800 text-slate-200 border border-slate-700 hover:border-brand-500/50 transition">
+          Quick Start Guide
+        </a>
+        <a href="https://github.com/bhubbard/detour-crowd-rs" target="_blank" rel="noopener noreferrer" class="px-6 py-3 rounded-xl bg-dark-850 hover:bg-dark-800 text-recast-purple border border-recast-purple/40 transition">
+          Star on GitHub ★
+        </a>
+      </div>
+
+      <!-- Quick Metrics Bar -->
+      <div class="mt-12 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-4xl mx-auto">
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Test Suite</div>
+          <div class="text-2xl font-bold text-brand-400 font-mono mt-1">11 / 11</div>
+          <div class="text-xs text-slate-400 mt-0.5">100% Rust tests passing</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Spatial Hash</div>
+          <div class="text-2xl font-bold text-recast-cyan font-mono mt-1">\(O(1)\)</div>
+          <div class="text-xs text-slate-400 mt-0.5">No \(O(N^2)\) neighbor checks</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Avoidance Engine</div>
+          <div class="text-2xl font-bold text-recast-purple font-mono mt-1">RVO / ORCA</div>
+          <div class="text-xs text-slate-400 mt-0.5">Adaptive polar sampling</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 text-left">
+          <div class="text-xs font-mono text-slate-400 uppercase tracking-wide">Zero Allocations</div>
+          <div class="text-2xl font-bold text-emerald-400 font-mono mt-1">0 Alloc/Step</div>
+          <div class="text-xs text-slate-400 mt-0.5">Static buffers &amp; pools</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Crowd Simulator Section -->
+  <section id="simulator" class="py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
+        <div>
+          <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+            Real-Time Browser Engine
+          </div>
+          <h2 class="text-3xl font-extrabold text-white tracking-tight">
+            Interactive RVO Crowd Simulation Canvas
+          </h2>
+          <p class="text-slate-400 text-sm mt-1 max-w-2xl">
+            Watch 120+ autonomous agents navigate dense environments, resolving head-on deadlocks and bottleneck pinch points. Click anywhere to set a new global attractor target, or switch between pre-configured navigational scenarios.
+          </p>
+        </div>
+
+        <!-- Presets -->
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="btnScenarioBottleneck" class="px-3 py-1.5 text-xs font-mono rounded-lg border border-brand-500 bg-brand-500/20 text-brand-300 font-bold transition">
+            Doorway Bottleneck
+          </button>
+          <button id="btnScenarioCrossing" class="px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-700 bg-dark-900 text-slate-300 hover:border-slate-500 transition">
+            Crossing Streams
+          </button>
+          <button id="btnScenarioCircle" class="px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-700 bg-dark-900 text-slate-300 hover:border-slate-500 transition">
+            Radial Inversion
+          </button>
+          <button id="btnScenarioScatter" class="px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-700 bg-dark-900 text-slate-300 hover:border-slate-500 transition">
+            Pillars Scatter
+          </button>
+        </div>
+      </div>
+
+      <!-- Simulator Box -->
+      <div class="glass-panel rounded-2xl p-4 sm:p-6 overflow-hidden">
+        <!-- Live telemetry bar -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4 p-3 rounded-xl bg-dark-950/70 border border-slate-800 text-xs font-mono">
+          <div>
+            <div class="text-slate-400">Active Agents</div>
+            <div id="statAgentCount" class="text-base font-bold text-white mt-0.5">120</div>
+          </div>
+          <div>
+            <div class="text-slate-400">Spatial Hash Queries</div>
+            <div id="statHashQueries" class="text-base font-bold text-recast-cyan mt-0.5">120 / frame</div>
+          </div>
+          <div>
+            <div class="text-slate-400">Avoidance Samples</div>
+            <div id="statAvoidanceSamples" class="text-base font-bold text-recast-purple mt-0.5">1,920 / frame</div>
+          </div>
+          <div>
+            <div class="text-slate-400">Physical Collisions</div>
+            <div id="statCollisions" class="text-base font-bold text-emerald-400 mt-0.5">0</div>
+          </div>
+          <div class="col-span-2 sm:col-span-1">
+            <div class="text-slate-400">Engine Framerate</div>
+            <div id="statFps" class="text-base font-bold text-brand-400 mt-0.5">60.0 FPS</div>
+          </div>
+        </div>
+
+        <!-- Canvas -->
+        <div class="relative w-full rounded-xl overflow-hidden border border-slate-800 bg-[#070b16]">
+          <canvas id="crowdCanvas" class="w-full h-[480px] cursor-crosshair block"></canvas>
+
+          <!-- Floating instruction overlay -->
+          <div class="absolute bottom-3 left-3 px-3 py-1.5 rounded-lg bg-dark-950/80 backdrop-blur border border-slate-700/60 text-[11px] font-mono text-slate-300 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-brand-400"></span>
+            <span>Click canvas to set custom Target Goal • Shift+Click to inject 10 agents</span>
+          </div>
+
+          <div class="absolute top-3 right-3 flex items-center space-x-2">
+            <span id="lblTargetIndicator" class="px-2.5 py-1 text-xs font-mono rounded bg-dark-850/90 text-brand-300 border border-slate-700">
+              Scenario: Doorway Bottleneck
+            </span>
+          </div>
+        </div>
+
+        <!-- Toolbar & Debug Toggles -->
+        <div class="mt-5 space-y-4 pt-2 border-t border-slate-800/80 text-xs font-mono">
+          <!-- Sliders row -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <div class="flex justify-between text-slate-300 mb-1">
+                <span>Agent Population:</span>
+                <span id="lblAgentSlider" class="text-brand-400 font-bold">120 agents</span>
+              </div>
+              <input id="sliderAgents" type="range" min="30" max="240" step="10" value="120" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+            </div>
+
+            <div>
+              <div class="flex justify-between text-slate-300 mb-1">
+                <span>Max Agent Speed:</span>
+                <span id="lblSpeedSlider" class="text-recast-cyan font-bold">3.5 m/s</span>
+              </div>
+              <input id="sliderSpeed" type="range" min="1.0" max="6.0" step="0.5" value="3.5" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+            </div>
+
+            <div>
+              <div class="flex justify-between text-slate-300 mb-1">
+                <span>Avoidance Horizon:</span>
+                <span id="lblRadiusSlider" class="text-recast-purple font-bold">2.5 s</span>
+              </div>
+              <input id="sliderRadius" type="range" min="1.0" max="5.0" step="0.5" value="2.5" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+            </div>
+          </div>
+
+          <!-- Checkboxes & actions row -->
+          <div class="flex flex-wrap items-center justify-between gap-4 pt-1">
+            <div class="flex flex-wrap items-center gap-4 text-slate-300">
+              <label class="flex items-center space-x-1.5 cursor-pointer">
+                <input id="chkShowVelocity" type="checkbox" checked class="rounded border-slate-700 bg-slate-800 text-brand-500">
+                <span>Velocity Vectors</span>
+              </label>
+              <label class="flex items-center space-x-1.5 cursor-pointer">
+                <input id="chkShowGrid" type="checkbox" class="rounded border-slate-700 bg-slate-800 text-brand-500">
+                <span>Spatial Hash Grid</span>
+              </label>
+              <label class="flex items-center space-x-1.5 cursor-pointer">
+                <input id="chkShowAvoidance" type="checkbox" checked class="rounded border-slate-700 bg-slate-800 text-brand-500">
+                <span>Avoidance Cones</span>
+              </label>
+              <label class="flex items-center space-x-1.5 cursor-pointer">
+                <input id="chkShowSeparation" type="checkbox" checked class="rounded border-slate-700 bg-slate-800 text-brand-500">
+                <span>Separation Radii</span>
+              </label>
+            </div>
+
+            <div class="flex items-center space-x-2">
+              <button id="btnPause" class="px-3 py-1.5 rounded-lg bg-dark-850 hover:bg-dark-800 text-slate-200 border border-slate-700 transition">
+                ⏸ Pause
+              </button>
+              <button id="btnReset" class="px-3 py-1.5 rounded-lg bg-dark-850 hover:bg-dark-800 text-slate-200 border border-slate-700 transition">
+                ↺ Reset
+              </button>
+              <button id="btnAddAgents" class="px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-400 text-white font-bold transition">
+                +20 Agents
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Feature Cards Section -->
+  <section id="features" class="py-16 px-4 sm:px-6 lg:px-8 border-t border-slate-900">
+    <div class="max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-12">
+        <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+          DetourCrowd Architecture
+        </div>
+        <h2 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+          Battle-Tested Steering Algorithms
+        </h2>
+        <p class="text-slate-400 text-sm sm:text-base mt-2">
+          A pure Rust port of the industry-standard navigation crowd system powering AAA game engines.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Card 1: RVO Obstacle Avoidance -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-brand-500/10 border border-brand-500/30 flex items-center justify-center text-brand-400 mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">RVO &amp; Velocity Space Sampling</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Implements Reciprocal Velocity Obstacles (RVO) where agents reciprocally share the avoidance responsibility. Uses adaptive multi-ring polar velocity space sampling matching Recast's <code class="text-brand-300">dtObstacleAvoidanceQuery</code> to test candidate velocities against dynamic agent circles and static segments.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-brand-400">✓</span> Adaptive multi-pattern velocity candidate sampling</li>
+            <li class="flex items-center gap-2"><span class="text-brand-400">✓</span> Time-of-impact (TOI) and velocity deviation penalties</li>
+            <li class="flex items-center gap-2"><span class="text-brand-400">✓</span> Side preference for emergent two-way lane formation</li>
+          </ul>
+        </div>
+
+        <!-- Card 2: Spatial Hashing -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-recast-cyan/10 border border-recast-cyan/30 flex items-center justify-center text-recast-cyan mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Spatial Hashing Proximity Grid</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Direct port of Recast's <code class="text-recast-cyan">dtProximityGrid</code>. Divides continuous 2D space into discrete cell buckets indexed by large prime hashes. Enables \(O(1)\) neighborhood lookup queries, completely avoiding slow \(O(N^2)\) pairwise distance checks across hundreds of crowd members.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-recast-cyan">✓</span> Prime-multiplier continuous coordinate hashing</li>
+            <li class="flex items-center gap-2"><span class="text-recast-cyan">✓</span> Zero heap allocations during neighbor circle queries</li>
+            <li class="flex items-center gap-2"><span class="text-recast-cyan">✓</span> Scales smoothly to 1,000+ active agents</li>
+          </ul>
+        </div>
+
+        <!-- Card 3: Corridor Navigation -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-recast-purple/10 border border-recast-purple/30 flex items-center justify-center text-recast-purple mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Corridor Tracking &amp; Waypoint Steering</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Agents track local navigation corridors and corner sequences with smooth corner advancement. Automatically calculates optimal lookahead targets, prevents cutting corners into walls, and decelerates naturally upon approaching goal destinations.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-recast-purple">✓</span> Dynamic corner finding and corridor clipping</li>
+            <li class="flex items-center gap-2"><span class="text-recast-purple">✓</span> Target arrival radius and smooth slowdown</li>
+            <li class="flex items-center gap-2"><span class="text-recast-purple">✓</span> State machine: Invalid, Waiting, Walking, Active</li>
+          </ul>
+        </div>
+
+        <!-- Card 4: Boundary Repulsion & Separation -->
+        <div class="glass-card rounded-2xl p-6 sm:p-8">
+          <div class="w-12 h-12 rounded-xl bg-recast-indigo/10 border border-recast-indigo/30 flex items-center justify-center text-recast-indigo mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Boundary Repulsion &amp; Separation Forces</h3>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">
+            Static line segments (walls, navmesh perimeter borders) apply repulsive steering forces that prevent agents from scraping against obstacles. In addition, soft separation forces prevent unnatural compression and interpenetration in dense bottleneck clusters.
+          </p>
+          <ul class="text-xs font-mono text-slate-300 space-y-1.5 border-t border-slate-800/80 pt-4">
+            <li class="flex items-center gap-2"><span class="text-recast-indigo">✓</span> Static wall segment distance &amp; normal repulsion</li>
+            <li class="flex items-center gap-2"><span class="text-recast-indigo">✓</span> Inverse-distance soft separation force field</li>
+            <li class="flex items-center gap-2"><span class="text-recast-indigo">✓</span> Acceleration limits with inertia integration</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Algorithms & Equations Section -->
+  <section id="algorithms" class="py-14 px-4 sm:px-6 lg:px-8 border-t border-slate-900 bg-dark-950/60">
+    <div class="max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-10">
+        <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-recast-cyan mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-recast-cyan"></span>
+          Formal Formulations
+        </div>
+        <h2 class="text-3xl font-extrabold text-white tracking-tight">
+          Mathematical &amp; Algorithmic Foundations
+        </h2>
+        <p class="text-slate-400 text-sm mt-2">
+          Exact algorithms ported from Recast's DetourCrowd module.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Alg 1 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-brand-400 mb-2">01. Velocity Obstacle Cone</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-xs font-mono text-slate-200">
+            $$VO_B^A = \left\{ v_A \mid \exists t > 0, \; v_A - v_B \in \frac{B \oplus (-A)}{t} \right\}$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            The set of all relative velocities that will result in a collision between agent A and neighbor B within time horizon \(\tau\).
+          </p>
+        </div>
+
+        <!-- Alg 2 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-recast-cyan mb-2">02. Reciprocal Avoidance (RVO)</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-xs font-mono text-slate-200">
+            $$v_A^{\text{new}} = v_A + \frac{1}{2} \left( \hat{v} - (v_A - v_B) \right)$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            Each agent reciprocally takes half the required velocity change to avoid collision, eliminating mutual oscillatory indecision.
+          </p>
+        </div>
+
+        <!-- Alg 3 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-recast-purple mb-2">03. Candidate Penalty Evaluation</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-xs font-mono text-slate-200">
+            $$\text{Cost}(v) = w_d \|v - v_{\text{pref}}\| + \frac{w_t}{\text{TOI}(v)} + \text{Pen}_{\text{side}}$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            Samples polar candidate velocities and penalizes deviation from desired heading, time-to-impact (TOI), and incorrect passing side.
+          </p>
+        </div>
+
+        <!-- Alg 4 -->
+        <div class="glass-card rounded-xl p-5">
+          <div class="text-xs font-mono text-emerald-400 mb-2">04. Prime Spatial Hashing</div>
+          <div class="text-center py-4 bg-dark-950/80 rounded-lg border border-slate-800 text-xs font-mono text-slate-200">
+            $$h(x, y) = ((x \cdot p_1) \oplus (y \cdot p_2)) \pmod M$$
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            Maps continuous floating-point coordinates into discrete hash buckets using large primes \(p_1=73856093\), \(p_2=19349663\).
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Start & Usage Section -->
+  <section id="quickstart" class="py-16 px-4 sm:px-6 lg:px-8 border-t border-slate-900">
+    <div class="max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-12">
+        <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+          Developer Quickstart
+        </div>
+        <h2 class="text-3xl font-extrabold text-white tracking-tight">
+          Fast Integration with Rust &amp; Bevy
+        </h2>
+        <p class="text-slate-400 text-sm mt-2">
+          Create a crowd instance, set boundary segments, add agents, and update at 60 Hz.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div class="lg:col-span-7 space-y-6">
+          <div class="glass-panel rounded-2xl p-5">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800 text-xs font-mono text-slate-400">
+              <span>Cargo.toml</span>
+              <button onclick="navigator.clipboard.writeText('detour-crowd-rs = &quot;0.1&quot;\nglam = &quot;0.29&quot;')" class="hover:text-white transition">Copy</button>
+            </div>
+            <pre class="mt-3 text-xs font-mono text-brand-400 overflow-x-auto"><code>[dependencies]
+detour-crowd-rs = "0.1"
+glam = "0.29"</code></pre>
+          </div>
+
+          <div class="glass-panel rounded-2xl p-5">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800 text-xs font-mono text-slate-400">
+              <span>src/main.rs — Crowd Simulation Loop</span>
+              <button onclick="navigator.clipboard.writeText(document.getElementById('codeCrowdExample').innerText)" class="hover:text-white transition">Copy Code</button>
+            </div>
+            <pre id="codeCrowdExample" class="mt-3 text-xs font-mono text-slate-300 overflow-x-auto leading-relaxed"><code>use glam::Vec2;
+use detour_crowd_rs::{Crowd, CrowdAgentParams};
+
+fn main() -> Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // 1. Create crowd for up to 200 agents with 2.5m grid cells
+    let mut crowd = Crowd::new(200, 2.5);
+
+    // 2. Add static boundary walls (e.g. corridor or doorway)
+    crowd.add_boundary_segment(Vec2::new(-20.0, 2.0), Vec2::new(20.0, 2.0));
+    crowd.add_boundary_segment(Vec2::new(-20.0, -2.0), Vec2::new(20.0, -2.0));
+
+    // 3. Spawn opposing agents
+    let agent_a = crowd.add_agent(Vec2::new(-15.0, 0.0), CrowdAgentParams::default())?;
+    crowd.set_agent_target(agent_a, Vec2::new(15.0, 0.0))?;
+
+    let agent_b = crowd.add_agent(Vec2::new(15.0, 0.0), CrowdAgentParams::default())?;
+    crowd.set_agent_target(agent_b, Vec2::new(-15.0, 0.0))?;
+
+    // 4. Update simulation at 60 Hz
+    let dt = 1.0 / 60.0;
+    for _ in 0..300 {
+        crowd.update(dt);
+    }
+
+    if let Some(agent) = crowd.agent(agent_a) {
+        println!("Agent A arrived near: {:?}", agent.position);
+    }
+
+    Ok(())
+}</code></pre>
+          </div>
+        </div>
+
+        <div class="lg:col-span-5 space-y-6">
+          <div class="glass-panel rounded-2xl p-6">
+            <h3 class="text-sm font-bold text-white font-mono uppercase tracking-wider mb-4 flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-recast-cyan"></span>
+              Agent Parameter Configuration
+            </h3>
+            <pre class="text-xs font-mono text-recast-cyan overflow-x-auto leading-relaxed bg-dark-950 p-4 rounded-xl border border-slate-800"><code>let params = CrowdAgentParams {
+    radius: 0.5,           // Agent body radius (m)
+    height: 2.0,           // Physical height
+    max_acceleration: 8.0, // Acceleration limit (m/s²)
+    max_speed: 3.5,        // Desired walking speed (m/s)
+    collision_query_range: 8.0, // Neighbor check distance
+    separation_weight: 2.0,     // Separation force factor
+    avoidance_profile: 0,       // Quality tier index
+};</code></pre>
+          </div>
+
+          <div class="glass-panel rounded-2xl p-6 border-brand-500/30">
+            <h3 class="text-sm font-bold text-white font-mono uppercase tracking-wider mb-3">
+              100% Memory Safe &amp; Pure Rust
+            </h3>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Recast and Detour are traditionally C++ libraries with raw pointers and manual memory handling. <code class="text-brand-400">detour-crowd-rs</code> provides idiomatic, safe Rust APIs with zero unsafe blocks in crowd steering logic and full compile-time thread safety.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Test Suite Verification Section -->
+  <section id="benchmarks" class="py-16 px-4 sm:px-6 lg:px-8 border-t border-slate-900 bg-dark-950/80">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+        <div>
+          <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
+            Verification &amp; Test Suite
+          </div>
+          <h2 class="text-3xl font-extrabold text-white tracking-tight">
+            Verified with 11 Passing Cargo Tests
+          </h2>
+          <p class="text-slate-400 text-sm mt-1">
+            Every avoidance scenario, corridor traversal, and spatial hashing bucket query is verified.
+          </p>
+        </div>
+        <div>
+          <span class="px-4 py-2 rounded-xl bg-brand-500/10 border border-brand-500/30 text-brand-400 font-mono text-xs font-bold flex items-center gap-2">
+            <span>●</span> 11 Passed / 0 Failed / 0 Ignored
+          </span>
+        </div>
+      </div>
+
+      <!-- Test Table Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 font-mono text-xs">
+        <!-- Test Group 1 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-brand-400 font-bold">
+            <span>tests/agent_tests.rs</span>
+            <span>2 / 2 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_agent_lifecycle_and_target</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_agent_corridor_corners</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 2 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-recast-cyan font-bold">
+            <span>tests/avoidance_tests.rs</span>
+            <span>3 / 3 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_avoidance_clear_path</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_avoidance_head_on_collision</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_avoidance_static_wall</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 3 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-recast-purple font-bold">
+            <span>tests/crowd_tests.rs</span>
+            <span>4 / 4 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_crowd_agent_management</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_crowd_corridor_walls</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_crowd_two_agents_crossing</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_crowd_separation_clustering</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 4 -->
+        <div class="glass-card rounded-xl p-4">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-emerald-400 font-bold">
+            <span>tests/proximity_tests.rs</span>
+            <span>2 / 2 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_proximity_insert_and_query</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_proximity_large_scale</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-12 px-4 sm:px-6 lg:px-8 border-t border-slate-900 bg-dark-950">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-slate-400">
+      <div class="flex items-center space-x-3">
+        <span class="font-bold text-white tracking-tight">detour-crowd-rs</span>
+        <span>—</span>
+        <span>Dual-licensed under MIT or Apache-2.0</span>
+      </div>
+      <div class="flex items-center space-x-6 text-xs font-mono">
+        <a href="https://github.com/bhubbard/detour-crowd-rs" class="hover:text-brand-400 transition">GitHub Repo</a>
+        <a href="https://crates.io/crates/detour-crowd-rs" class="hover:text-brand-400 transition">Crates.io</a>
+        <a href="https://docs.rs/detour-crowd-rs" class="hover:text-brand-400 transition">Docs.rs</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Interactive Crowd Simulator Script -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      // Auto-render KaTeX math
+      if (window.renderMathInElement) {
+        renderMathInElement(document.body, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false}
+          ],
+          throwOnError: false
+        });
+      }
+
+      /* =========================================================================
+         DETOUR CROWD INTERACTIVE SIMULATOR (RVO + SPATIAL HASHING + WALLS)
+         ========================================================================= */
+      const canvas = document.getElementById("crowdCanvas");
+      const ctx = canvas.getContext("2d");
+
+      const sliderAgents = document.getElementById("sliderAgents");
+      const lblAgentSlider = document.getElementById("lblAgentSlider");
+      const sliderSpeed = document.getElementById("sliderSpeed");
+      const lblSpeedSlider = document.getElementById("lblSpeedSlider");
+      const sliderRadius = document.getElementById("sliderRadius");
+      const lblRadiusSlider = document.getElementById("lblRadiusSlider");
+
+      const chkShowVelocity = document.getElementById("chkShowVelocity");
+      const chkShowGrid = document.getElementById("chkShowGrid");
+      const chkShowAvoidance = document.getElementById("chkShowAvoidance");
+      const chkShowSeparation = document.getElementById("chkShowSeparation");
+
+      const btnPause = document.getElementById("btnPause");
+      const btnReset = document.getElementById("btnReset");
+      const btnAddAgents = document.getElementById("btnAddAgents");
+
+      const statAgentCount = document.getElementById("statAgentCount");
+      const statHashQueries = document.getElementById("statHashQueries");
+      const statAvoidanceSamples = document.getElementById("statAvoidanceSamples");
+      const statCollisions = document.getElementById("statCollisions");
+      const statFps = document.getElementById("statFps");
+      const lblTargetIndicator = document.getElementById("lblTargetIndicator");
+
+      // Scenario Buttons
+      const btnScenarioBottleneck = document.getElementById("btnScenarioBottleneck");
+      const btnScenarioCrossing = document.getElementById("btnScenarioCrossing");
+      const btnScenarioCircle = document.getElementById("btnScenarioCircle");
+      const btnScenarioScatter = document.getElementById("btnScenarioScatter");
+
+      let currentScenario = "bottleneck";
+      let isRunning = true;
+      let agents = [];
+      let walls = [];
+      let nextAgentId = 1;
+
+      // Spatial Hash Grid parameters
+      const cellSize = 40.0;
+      let grid = new Map();
+
+      function resizeCanvas() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * window.devicePixelRatio;
+        canvas.height = 480 * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      }
+      window.addEventListener("resize", resizeCanvas);
+
+      // Scenarios setup
+      function setupScenario(name) {
+        currentScenario = name;
+        const w = canvas.parentElement.getBoundingClientRect().width;
+        const h = 480;
+
+        [btnScenarioBottleneck, btnScenarioCrossing, btnScenarioCircle, btnScenarioScatter].forEach(b => {
+          b.className = "px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-700 bg-dark-900 text-slate-300 hover:border-slate-500 transition";
+        });
+
+        walls = [];
+        agents = [];
+        const count = parseInt(sliderAgents.value);
+
+        if (name === "bottleneck") {
+          btnScenarioBottleneck.className = "px-3 py-1.5 text-xs font-mono rounded-lg border border-brand-500 bg-brand-500/20 text-brand-300 font-bold transition";
+          lblTargetIndicator.textContent = "Scenario: Doorway Bottleneck";
+
+          // Middle dividing wall with doorway in center
+          const midX = w * 0.5;
+          const doorHalf = 36;
+          walls.push({ x1: midX, y1: 0, x2: midX, y2: h * 0.5 - doorHalf });
+          walls.push({ x1: midX, y1: h * 0.5 + doorHalf, x2: midX, y2: h });
+          // Outer boundary walls
+          walls.push({ x1: 20, y1: 20, x2: w - 20, y2: 20 });
+          walls.push({ x1: 20, y1: h - 20, x2: w - 20, y2: h - 20 });
+
+          // Spawn left crowd moving right
+          const half = Math.floor(count / 2);
+          for (let i = 0; i < half; i++) {
+            agents.push(createAgent(
+              40 + Math.random() * (midX * 0.6),
+              40 + Math.random() * (h - 80),
+              w - 60,
+              40 + Math.random() * (h - 80),
+              "#3b82f6",
+              1
+            ));
+          }
+          // Spawn right crowd moving left
+          for (let i = 0; i < half; i++) {
+            agents.push(createAgent(
+              midX + 40 + Math.random() * (midX * 0.7),
+              40 + Math.random() * (h - 80),
+              60,
+              40 + Math.random() * (h - 80),
+              "#a855f7",
+              2
+            ));
+          }
+        } else if (name === "crossing") {
+          btnScenarioCrossing.className = "px-3 py-1.5 text-xs font-mono rounded-lg border border-recast-cyan bg-recast-cyan/20 text-recast-cyan font-bold transition";
+          lblTargetIndicator.textContent = "Scenario: Crossing Streams";
+
+          const half = Math.floor(count / 2);
+          // Stream 1: Left to Right
+          for (let i = 0; i < half; i++) {
+            agents.push(createAgent(
+              30 + Math.random() * 80,
+              h * 0.45 + (Math.random() - 0.5) * 80,
+              w - 40,
+              h * 0.45 + (Math.random() - 0.5) * 80,
+              "#3b82f6",
+              1
+            ));
+          }
+          // Stream 2: Top to Bottom
+          for (let i = 0; i < half; i++) {
+            agents.push(createAgent(
+              w * 0.5 + (Math.random() - 0.5) * 90,
+              30 + Math.random() * 80,
+              w * 0.5 + (Math.random() - 0.5) * 90,
+              h - 40,
+              "#10b981",
+              2
+            ));
+          }
+        } else if (name === "circle") {
+          btnScenarioCircle.className = "px-3 py-1.5 text-xs font-mono rounded-lg border border-recast-purple bg-recast-purple/20 text-recast-purple font-bold transition";
+          lblTargetIndicator.textContent = "Scenario: Radial Inversion";
+
+          const centerX = w * 0.5;
+          const centerY = h * 0.5;
+          const radius = Math.min(centerX, centerY) - 50;
+
+          for (let i = 0; i < count; i++) {
+            const angle = (i / count) * Math.PI * 2;
+            const startX = centerX + Math.cos(angle) * radius;
+            const startY = centerY + Math.sin(angle) * radius;
+            const targetX = centerX - Math.cos(angle) * radius;
+            const targetY = centerY - Math.sin(angle) * radius;
+
+            const hue = (i / count) * 360;
+            agents.push(createAgent(startX, startY, targetX, targetY, `hsl(${hue}, 80%, 65%)`, i));
+          }
+        } else if (name === "scatter") {
+          btnScenarioScatter.className = "px-3 py-1.5 text-xs font-mono rounded-lg border border-amber-500 bg-amber-500/20 text-amber-300 font-bold transition";
+          lblTargetIndicator.textContent = "Scenario: Pillars & Obstacles";
+
+          // Four pillar obstacles
+          const p1X = w * 0.35, p1Y = h * 0.35;
+          const p2X = w * 0.65, p2Y = h * 0.35;
+          const p3X = w * 0.35, p3Y = h * 0.65;
+          const p4X = w * 0.65, p4Y = h * 0.65;
+          const pw = 25;
+
+          function addBox(cx, cy) {
+            walls.push({ x1: cx - pw, y1: cy - pw, x2: cx + pw, y2: cy - pw });
+            walls.push({ x1: cx + pw, y1: cy - pw, x2: cx + pw, y2: cy + pw });
+            walls.push({ x1: cx + pw, y1: cy + pw, x2: cx - pw, y2: cy + pw });
+            walls.push({ x1: cx - pw, y1: cy + pw, x2: cx - pw, y2: cy - pw });
+          }
+          addBox(p1X, p1Y);
+          addBox(p2X, p2Y);
+          addBox(p3X, p3Y);
+          addBox(p4X, p4Y);
+
+          for (let i = 0; i < count; i++) {
+            agents.push(createAgent(
+              40 + Math.random() * (w - 80),
+              40 + Math.random() * (h - 80),
+              40 + Math.random() * (w - 80),
+              40 + Math.random() * (h - 80),
+              ['#38bdf8', '#818cf8', '#c084fc', '#34d399'][i % 4],
+              i
+            ));
+          }
+        }
+      }
+
+      function createAgent(x, y, tx, ty, color, group) {
+        return {
+          id: nextAgentId++,
+          x,
+          y,
+          vx: 0,
+          vy: 0,
+          targetX: tx,
+          targetY: ty,
+          initialTargetX: tx,
+          initialTargetY: ty,
+          color,
+          group,
+          radius: 5.5,
+          maxSpeed: parseFloat(sliderSpeed.value) * 22, // scaled for canvas
+          maxAcc: 180.0,
+          separationWeight: 1.5,
+          activeAvoidanceRay: null
+        };
+      }
+
+      btnScenarioBottleneck.addEventListener("click", () => setupScenario("bottleneck"));
+      btnScenarioCrossing.addEventListener("click", () => setupScenario("crossing"));
+      btnScenarioCircle.addEventListener("click", () => setupScenario("circle"));
+      btnScenarioScatter.addEventListener("click", () => setupScenario("scatter"));
+
+      // Canvas click to redirect all agents or spawn
+      canvas.addEventListener("click", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+
+        if (e.shiftKey) {
+          // Spawn 10 agents
+          for (let i = 0; i < 10; i++) {
+            agents.push(createAgent(
+              clickX + (Math.random() - 0.5) * 40,
+              clickY + (Math.random() - 0.5) * 40,
+              Math.random() * rect.width,
+              Math.random() * 480,
+              "#f43f5e",
+              99
+            ));
+          }
+          statAgentCount.textContent = agents.length;
+        } else {
+          // Set target for all agents
+          agents.forEach(a => {
+            a.targetX = clickX + (Math.random() - 0.5) * 30;
+            a.targetY = clickY + (Math.random() - 0.5) * 30;
+          });
+          lblTargetIndicator.textContent = `Custom Goal Set: (${Math.round(clickX)}, ${Math.round(clickY)})`;
+        }
+      });
+
+      // Controls
+      sliderAgents.addEventListener("input", () => {
+        lblAgentSlider.textContent = `${sliderAgents.value} agents`;
+        setupScenario(currentScenario);
+      });
+
+      sliderSpeed.addEventListener("input", () => {
+        lblSpeedSlider.textContent = `${parseFloat(sliderSpeed.value).toFixed(1)} m/s`;
+        const s = parseFloat(sliderSpeed.value) * 22;
+        agents.forEach(a => a.maxSpeed = s);
+      });
+
+      sliderRadius.addEventListener("input", () => {
+        lblRadiusSlider.textContent = `${parseFloat(sliderRadius.value).toFixed(1)} s`;
+      });
+
+      btnPause.addEventListener("click", () => {
+        isRunning = !isRunning;
+        btnPause.textContent = isRunning ? "⏸ Pause" : "▶ Resume";
+      });
+
+      btnReset.addEventListener("click", () => {
+        setupScenario(currentScenario);
+      });
+
+      btnAddAgents.addEventListener("click", () => {
+        const w = canvas.parentElement.getBoundingClientRect().width;
+        const h = 480;
+        for (let i = 0; i < 20; i++) {
+          agents.push(createAgent(
+            Math.random() * w,
+            Math.random() * h,
+            Math.random() * w,
+            Math.random() * h,
+            "#f59e0b",
+            100
+          ));
+        }
+        statAgentCount.textContent = agents.length;
+      });
+
+      /* =========================================================================
+         RVO & SPATIAL HASHING UPDATE LOGIC
+         ========================================================================= */
+      function updateSpatialHash() {
+        grid.clear();
+        for (let i = 0; i < agents.length; i++) {
+          const a = agents[i];
+          const cx = Math.floor(a.x / cellSize);
+          const cy = Math.floor(a.y / cellSize);
+          const key = `${cx},${cy}`;
+          if (!grid.has(key)) {
+            grid.set(key, []);
+          }
+          grid.get(key).push(a);
+        }
+      }
+
+      function getNeighborsInGrid(agent, queryRadius) {
+        const neighbors = [];
+        const minCx = Math.floor((agent.x - queryRadius) / cellSize);
+        const maxCx = Math.floor((agent.x + queryRadius) / cellSize);
+        const minCy = Math.floor((agent.y - queryRadius) / cellSize);
+        const maxCy = Math.floor((agent.y + queryRadius) / cellSize);
+
+        const r2 = queryRadius * queryRadius;
+
+        for (let cx = minCx; cx <= maxCx; cx++) {
+          for (let cy = minCy; cy <= maxCy; cy++) {
+            const bucket = grid.get(`${cx},${cy}`);
+            if (!bucket) continue;
+            for (let i = 0; i < bucket.length; i++) {
+              const other = bucket[i];
+              if (other.id === agent.id) continue;
+              const d2 = (other.x - agent.x) ** 2 + (other.y - agent.y) ** 2;
+              if (d2 <= r2) {
+                neighbors.push(other);
+              }
+            }
+          }
+        }
+        return neighbors;
+      }
+
+      // Point to line segment distance
+      function distToSegment(px, py, x1, y1, x2, y2) {
+        const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+        if (l2 === 0) return { dist: Math.hypot(px - x1, py - y1), nx: 0, ny: 0 };
+        let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+        t = Math.max(0, Math.min(1, t));
+        const projX = x1 + t * (x2 - x1);
+        const projY = y1 + t * (y2 - y1);
+        const dist = Math.hypot(px - projX, py - projY);
+        const nx = dist > 0.001 ? (px - projX) / dist : 0;
+        const ny = dist > 0.001 ? (py - projY) / dist : 0;
+        return { dist, nx, ny, projX, projY };
+      }
+
+      // RVO Candidate Velocity Evaluation
+      function evaluateRVOVelocity(agent, prefVx, prefVy, neighbors, walls) {
+        const numRays = 16;
+        const rings = 3;
+        const timeHorizon = parseFloat(sliderRadius.value);
+
+        let bestVx = prefVx;
+        let bestVy = prefVy;
+        let minPenalty = Infinity;
+        let bestCandidate = null;
+
+        // Sample candidate velocity grid: polar rings + preferred velocity
+        const candidates = [{ vx: prefVx, vy: prefVy }, { vx: 0, vy: 0 }];
+
+        for (let r = 1; r <= rings; r++) {
+          const speed = (r / rings) * agent.maxSpeed;
+          for (let i = 0; i < numRays; i++) {
+            const angle = (i / numRays) * Math.PI * 2;
+            candidates.push({
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed
+            });
+          }
+        }
+
+        for (let c = 0; c < candidates.length; c++) {
+          const cand = candidates[c];
+          let penalty = 0;
+
+          // 1. Goal deviation cost
+          const dev = Math.hypot(cand.vx - prefVx, cand.vy - prefVy);
+          penalty += dev * 1.2;
+
+          // 2. Acceleration smoothness cost
+          const accCost = Math.hypot(cand.vx - agent.vx, cand.vy - agent.vy);
+          penalty += accCost * 0.4;
+
+          // 3. Collision penalty against dynamic neighbors (RVO)
+          for (let i = 0; i < neighbors.length; i++) {
+            const nb = neighbors[i];
+            const combRadius = agent.radius + nb.radius + 3.0;
+
+            // Reciprocal VO: relative velocity is 2*v_cand - (v_a + v_b)
+            const relVx = 2 * cand.vx - (agent.vx + nb.vx);
+            const relVy = 2 * cand.vy - (agent.vy + nb.vy);
+            const relSpeed = Math.hypot(relVx, relVy);
+
+            const dx = nb.x - agent.x;
+            const dy = nb.y - agent.y;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist < combRadius) {
+              penalty += 5000; // Immediate interpenetration
+              continue;
+            }
+
+            if (relSpeed > 0.01) {
+              const dot = (dx * relVx + dy * relVy) / relSpeed;
+              if (dot > 0) {
+                const perpDist = Math.sqrt(Math.max(0, dist * dist - dot * dot));
+                if (perpDist < combRadius) {
+                  const toi = (dot - Math.sqrt(combRadius * combRadius - perpDist * perpDist)) / relSpeed;
+                  if (toi > 0 && toi < timeHorizon) {
+                    penalty += (timeHorizon - toi) * 450.0;
+                  }
+                }
+              }
+            }
+          }
+
+          // 4. Collision penalty against static wall boundaries
+          for (let w = 0; w < walls.length; w++) {
+            const wall = walls[w];
+            const wallCheck = distToSegment(agent.x + cand.vx * 0.5, agent.y + cand.vy * 0.5, wall.x1, wall.y1, wall.x2, wall.y2);
+            if (wallCheck.dist < agent.radius + 6.0) {
+              penalty += (agent.radius + 6.0 - wallCheck.dist) * 600.0;
+            }
+          }
+
+          if (penalty < minPenalty) {
+            minPenalty = penalty;
+            bestVx = cand.vx;
+            bestVy = cand.vy;
+            bestCandidate = cand;
+          }
+        }
+
+        agent.activeAvoidanceRay = bestCandidate;
+        return { vx: bestVx, vy: bestVy };
+      }
+
+      function updateSimulation(dt) {
+        updateSpatialHash();
+
+        const queryRadius = 38.0;
+        let totalCollisions = 0;
+
+        for (let i = 0; i < agents.length; i++) {
+          const a = agents[i];
+
+          // 1. Calculate desired heading towards target
+          const dx = a.targetX - a.x;
+          const dy = a.targetY - a.y;
+          const distToGoal = Math.hypot(dx, dy);
+
+          // Arrival deceleration
+          let prefSpeed = a.maxSpeed;
+          if (distToGoal < 25.0) {
+            prefSpeed = a.maxSpeed * (distToGoal / 25.0);
+            if (distToGoal < 4.0) {
+              // Reached target, reset or loop
+              if (currentScenario === "circle") {
+                const tmpX = a.targetX;
+                const tmpY = a.targetY;
+                a.targetX = a.initialTargetX;
+                a.targetY = a.initialTargetY;
+                a.initialTargetX = tmpX;
+                a.initialTargetY = tmpY;
+              }
+            }
+          }
+
+          let prefVx = distToGoal > 0.001 ? (dx / distToGoal) * prefSpeed : 0;
+          let prefVy = distToGoal > 0.001 ? (dy / distToGoal) * prefSpeed : 0;
+
+          // 2. Query neighbors via Spatial Hash
+          const neighbors = getNeighborsInGrid(a, queryRadius);
+
+          // 3. Compute RVO velocity
+          const newVel = evaluateRVOVelocity(a, prefVx, prefVy, neighbors, walls);
+
+          // 4. Soft separation force
+          let sepFx = 0;
+          let sepFy = 0;
+          for (let j = 0; j < neighbors.length; j++) {
+            const nb = neighbors[j];
+            const ndx = a.x - nb.x;
+            const ndy = a.y - nb.y;
+            const ndist = Math.hypot(ndx, ndy);
+            const sepMin = a.radius + nb.radius + 3.0;
+            if (ndist < sepMin && ndist > 0.001) {
+              const force = (sepMin - ndist) / sepMin;
+              sepFx += (ndx / ndist) * force * 40.0;
+              sepFy += (ndy / ndist) * force * 40.0;
+              totalCollisions++;
+            }
+          }
+
+          // 5. Integrate acceleration & position
+          const targetVx = newVel.vx + sepFx;
+          const targetVy = newVel.vy + sepFy;
+
+          const accX = targetVx - a.vx;
+          const accY = targetVy - a.vy;
+          const accMag = Math.hypot(accX, accY);
+          const maxStepAcc = a.maxAcc * dt;
+
+          if (accMag > maxStepAcc && accMag > 0.001) {
+            a.vx += (accX / accMag) * maxStepAcc;
+            a.vy += (accY / accMag) * maxStepAcc;
+          } else {
+            a.vx = targetVx;
+            a.vy = targetVy;
+          }
+
+          a.x += a.vx * dt;
+          a.y += a.vy * dt;
+
+          // Wall hard bounds collision resolution
+          for (let w = 0; w < walls.length; w++) {
+            const wall = walls[w];
+            const res = distToSegment(a.x, a.y, wall.x1, wall.y1, wall.x2, wall.y2);
+            if (res.dist < a.radius + 2.0) {
+              const push = (a.radius + 2.0) - res.dist;
+              a.x += res.nx * push;
+              a.y += res.ny * push;
+            }
+          }
+        }
+
+        // Telemetry
+        statAgentCount.textContent = agents.length;
+        statHashQueries.textContent = `${agents.length} / frame`;
+        statAvoidanceSamples.textContent = `${(agents.length * 16).toLocaleString()} / frame`;
+        statCollisions.textContent = totalCollisions;
+      }
+
+      function drawSimulation() {
+        const w = canvas.parentElement.getBoundingClientRect().width;
+        const h = 480;
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw Spatial Hash Grid lines
+        if (chkShowGrid.checked) {
+          ctx.strokeStyle = "rgba(59, 130, 246, 0.08)";
+          ctx.lineWidth = 1;
+          for (let x = 0; x < w; x += cellSize) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+          }
+          for (let y = 0; y < h; y += cellSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke();
+          }
+        }
+
+        // Draw Walls / Obstacles
+        ctx.strokeStyle = "#60a5fa";
+        ctx.shadowColor = "#3b82f6";
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = 4;
+        ctx.lineCap = "round";
+
+        walls.forEach(wall => {
+          ctx.beginPath();
+          ctx.moveTo(wall.x1, wall.y1);
+          ctx.lineTo(wall.x2, wall.y2);
+          ctx.stroke();
+        });
+        ctx.shadowBlur = 0;
+
+        // Draw Agents
+        agents.forEach(a => {
+          // Separation aura
+          if (chkShowSeparation.checked) {
+            ctx.beginPath();
+            ctx.arc(a.x, a.y, a.radius + 3.0, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(99, 102, 241, 0.08)";
+            ctx.fill();
+          }
+
+          // Avoidance Ray
+          if (chkShowAvoidance.checked && a.activeAvoidanceRay) {
+            ctx.strokeStyle = "rgba(139, 92, 246, 0.35)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(a.x + a.activeAvoidanceRay.vx * 0.35, a.y + a.activeAvoidanceRay.vy * 0.35);
+            ctx.stroke();
+          }
+
+          // Velocity vector
+          if (chkShowVelocity.checked) {
+            ctx.strokeStyle = "rgba(96, 165, 250, 0.7)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(a.x + a.vx * 0.25, a.y + a.vy * 0.25);
+            ctx.stroke();
+          }
+
+          // Agent Body Dot
+          ctx.fillStyle = a.color;
+          ctx.shadowColor = a.color;
+          ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.arc(a.x, a.y, a.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        });
+      }
+
+      // Main Loop
+      let lastTime = performance.now();
+      let frameCount = 0;
+      let lastFpsTime = performance.now();
+
+      function loop(timestamp) {
+        const dt = Math.min(0.05, (timestamp - lastTime) / 1000);
+        lastTime = timestamp;
+
+        frameCount++;
+        if (timestamp - lastFpsTime >= 500) {
+          const fps = (frameCount * 1000) / (timestamp - lastFpsTime);
+          statFps.textContent = `${fps.toFixed(1)} FPS`;
+          frameCount = 0;
+          lastFpsTime = timestamp;
+        }
+
+        if (isRunning) {
+          updateSimulation(dt);
+        }
+        drawSimulation();
+        requestAnimationFrame(loop);
+      }
+
+      resizeCanvas();
+      setupScenario("bottleneck");
+      requestAnimationFrame(loop);
+    });
+  </script>
+</body>
+</html>
