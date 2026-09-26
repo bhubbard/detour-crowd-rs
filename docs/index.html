@@ -1299,19 +1299,39 @@ fn main() -> Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
         <div>
           <div class="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-brand-400 mb-2">
             <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
-            Verification &amp; Test Suite
+            Performance Benchmarks &amp; Verification
           </div>
           <h2 class="text-3xl font-extrabold text-white tracking-tight">
-            Verified with 11 Passing Cargo Tests
+            Microsecond Collision Avoidance vs. C++ DetourCrowd
           </h2>
           <p class="text-slate-400 text-sm mt-1">
-            Every avoidance scenario, corridor traversal, and spatial hashing bucket query is verified.
+            Comparing native Rust SIMD avoidance and spatial hashing against upstream RecastNavigation.
+            <a href="https://github.com/bhubbard/detour-crowd-rs/blob/main/BENCHMARKS.md" class="text-brand-400 hover:underline font-mono ml-2">View Full BENCHMARKS.md →</a>
           </p>
         </div>
         <div>
           <span class="px-4 py-2 rounded-xl bg-brand-500/10 border border-brand-500/30 text-brand-400 font-mono text-xs font-bold flex items-center gap-2">
-            <span>●</span> 11 Passed / 0 Failed / 0 Ignored
+            <span>●</span> 7.6M Queries/sec · 224 µs Crowd Step
           </span>
+        </div>
+      </div>
+
+      <!-- Comparative Benchmark Metric Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 font-mono text-xs">
+        <div class="glass-card rounded-xl p-4 border border-brand-500/20 bg-dark-900/60">
+          <div class="text-slate-400 text-[11px] uppercase tracking-wider mb-1">100 Agents Step Latency</div>
+          <div class="text-2xl font-bold text-brand-400">224.6 µs <span class="text-xs text-slate-400 font-normal">/ step</span></div>
+          <div class="text-slate-500 text-[11px] mt-1">&lt;1.5% of a 16.6ms 60 FPS frame</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 border border-recast-cyan/20 bg-dark-900/60">
+          <div class="text-slate-400 text-[11px] uppercase tracking-wider mb-1">Spatial Proximity Grid</div>
+          <div class="text-2xl font-bold text-recast-cyan">7.65M <span class="text-xs text-slate-400 font-normal">queries/s</span></div>
+          <div class="text-slate-500 text-[11px] mt-1">130.7 ns zero-allocation hash bucket lookup</div>
+        </div>
+        <div class="glass-card rounded-xl p-4 border border-emerald-500/20 bg-dark-900/60">
+          <div class="text-slate-400 text-[11px] uppercase tracking-wider mb-1">Memory Efficiency vs C++</div>
+          <div class="text-2xl font-bold text-emerald-400">1.8 MB <span class="text-xs text-slate-400 font-normal">vs 7.8 MB</span></div>
+          <div class="text-slate-500 text-[11px] mt-1">4.3× lower RAM footprint, bounds-checked</div>
         </div>
       </div>
 
