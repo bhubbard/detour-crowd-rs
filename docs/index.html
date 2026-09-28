@@ -1336,7 +1336,7 @@ fn main() -> Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
       </div>
 
       <!-- Test Table Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 font-mono text-xs">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 font-mono text-xs">
         <!-- Test Group 1 -->
         <div class="glass-card rounded-xl p-4">
           <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-brand-400 font-bold">
@@ -1385,6 +1385,19 @@ fn main() -> Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
           <ul class="mt-2.5 space-y-1.5 text-slate-300">
             <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_proximity_insert_and_query</li>
             <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_proximity_large_scale</li>
+          </ul>
+        </div>
+
+        <!-- Test Group 5 (Accuracy & Collision Invariant) -->
+        <div class="glass-card rounded-xl p-4 border border-brand-500/30">
+          <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-brand-400 font-bold">
+            <span>tests/accuracy_test.rs</span>
+            <span>3 / 3 PASS</span>
+          </div>
+          <ul class="mt-2.5 space-y-1.5 text-slate-300">
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_geodesic_path_optimality</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_rvo_head_on_clearance</li>
+            <li class="flex items-center gap-2"><span class="text-emerald-400">ok</span> test_velocity_clamping</li>
           </ul>
         </div>
       </div>
